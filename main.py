@@ -67,9 +67,9 @@ AGENT_CARD = {
     }
   ],
   "capabilities": {
-    "streaming": false,
-    "pushNotifications": false,
-    "stateTransitionHistory": false,
+    "streaming": False,
+    "pushNotifications": False,
+    "stateTransitionHistory": False,
     "extensions": []
   },
   "defaultInputModes": [
@@ -78,7 +78,7 @@ AGENT_CARD = {
   "defaultOutputModes": [
     "application/json"
   ],
-  "supportsAuthenticatedExtendedCard": false    
+  "supportsAuthenticatedExtendedCard": False    
 }
 
 # ── Schemas ────────────────────────────────────────────────────────────────────
