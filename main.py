@@ -26,7 +26,8 @@ app = FastAPI(
     version="1.0.0"
 )
 
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+#GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+GROQ_API_KEY = "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"
 GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
 MODEL_NAME   = "llama-3.1-8b-instant" 
 
@@ -112,6 +113,10 @@ class SentimentResponse(BaseModel):
     contextId: Optional[str] = None
     agent: AgentMeta
 
+class JsonRpcResponse(BaseModel):
+    jsonrpc: str = "2.0"
+    id: str
+    result: SentimentResponse  # This nests your existing model inside 'result'
 # ── JSON extractor ─────────────────────────────────────────────────────────────
 def extract_json(raw_text: str) -> dict:
     # Try clean parse first
@@ -158,7 +163,7 @@ async def agent_card():
     # (Agent card logic remains the same)
     return JSONResponse(content={"name": "sentiment-analysis-agent"})
 
-@app.post("/analyze", response_model=SentimentResponse, tags=["Agent"])
+@app.post("/analyze", response_model=JsonRpcResponse, tags=["Agent"])
 async def analyze_sentiment(
     req: AgentRequest,
     x_agent_context_id: str = Header(None)
@@ -212,7 +217,7 @@ async def analyze_sentiment(
         # 2. Wrap it in the JSON-RPC format required by the A2A spec
         return {
             "jsonrpc": "2.0",
-            "id": req.message.messageId, # Use the incoming messageId as the RPC ID
+            "id": x_agent_context_id or req.message.messageId, # Use the incoming messageId as the RPC ID
             "result": sentiment_data
         }
 
