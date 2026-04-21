@@ -27,7 +27,6 @@ app = FastAPI(
 )
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
-#GROQ_API_KEY = "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"
 GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
 MODEL_NAME   = "llama-3.1-8b-instant" 
 
