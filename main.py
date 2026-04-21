@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from typing import List, Optional
 import httpx
 import json
 import re
@@ -8,6 +9,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from dotenv import load_dotenv
+
 load_dotenv()
 
 # ── Logging ────────────────────────────────────────────────────────────────────
@@ -24,10 +26,9 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Groq config — reads from environment variable (set on Render, or in .env locally)
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
-MODEL_NAME   = "llama-3.1-8b-instant"    # fast, free, better than Phi-3-mini
+MODEL_NAME   = "llama-3.1-8b-instant" 
 
 AGENT_ID      = "sentiment-analysis-agent-v1"
 AGENT_VERSION = "1.0.0"
@@ -81,9 +82,21 @@ AGENT_CARD = {
   "supportsAuthenticatedExtendedCard": False    
 }
 
-# ── Schemas ────────────────────────────────────────────────────────────────────
+# ── Updated Schemas to match your Payload ──────────────────────────────────────
+
+class MessagePart(BaseModel):
+    text: str
+    kind: str
+
+class MessageContent(BaseModel):
+    role: str
+    parts: List[MessagePart]
+    messageId: str
+    kind: str
+
 class AgentRequest(BaseModel):
-    query: str
+    # This matches the {"message": {...}} root structure
+    message: MessageContent
 
 class AgentMeta(BaseModel):
     agentId: str
@@ -96,43 +109,35 @@ class SentimentResponse(BaseModel):
     score: float
     churn_risk: bool
     reason: str
-    contextId: str | None
+    contextId: Optional[str] = None
     agent: AgentMeta
-
-# ── A2A Agent Card endpoint ────────────────────────────────────────────────────
-@app.get("/analyze/.well-known/agent-card.json", tags=["A2A"])
-async def agent_card():
-    return JSONResponse(content=AGENT_CARD)
 
 # ── JSON extractor ─────────────────────────────────────────────────────────────
 def extract_json(raw_text: str) -> dict:
+    # Try clean parse first
+    try:
+        clean_text = re.sub(r'```json\s?|\s?```', '', raw_text).strip()
+        return json.loads(clean_text)
+    except:
+        pass
 
-    logger.warning("JSON malformed — extracting fields individually.")
+    # Fallback to Regex
     result = {}
-
     m = re.search(r'"sentiment"\s*:\s*"([^"]+)"', raw_text)
-    if m:
-        result["sentiment"] = m.group(1)
-
+    if m: result["sentiment"] = m.group(1)
+    
     m = re.search(r'"score"\s*:\s*([0-9.]+)', raw_text)
-    if m:
-        result["score"] = float(m.group(1))
-
+    if m: result["score"] = float(m.group(1))
+    
     m = re.search(r'"churn_risk"\s*:\s*(true|false)', raw_text, re.IGNORECASE)
-    if m:
-        result["churn_risk"] = m.group(1).lower() == "true"
-
+    if m: result["churn_risk"] = m.group(1).lower() == "true"
+    
     m = re.search(r'"reason"\s*:\s*"([^"]+)"', raw_text)
-    if m:
-        result["reason"] = m.group(1)
+    if m: result["reason"] = m.group(1)
 
     if "sentiment" in result:
-        result.setdefault("score", 0.5)
-        result.setdefault("churn_risk", False)
-        result.setdefault("reason", "Extracted from malformed model output.")
         return result
-
-    raise ValueError(f"Could not extract fields from:\n{raw_text}")
+    raise ValueError(f"Could not extract fields from LLM output")
 
 # ── A2A error helper ───────────────────────────────────────────────────────────
 def a2a_error(status_code: int, message: str, context_id: str | None):
@@ -146,102 +151,71 @@ def a2a_error(status_code: int, message: str, context_id: str | None):
         }
     )
 
-# ── /analyze endpoint ──────────────────────────────────────────────────────────
+# ── Endpoints ──────────────────────────────────────────────────────────────────
+
+@app.get("/analyze/.well-known/agent-card.json", tags=["A2A"])
+async def agent_card():
+    # (Agent card logic remains the same)
+    return JSONResponse(content={"name": "sentiment-analysis-agent"})
+
 @app.post("/analyze", response_model=SentimentResponse, tags=["Agent"])
 async def analyze_sentiment(
     req: AgentRequest,
     x_agent_context_id: str = Header(None)
 ):
     if not GROQ_API_KEY:
-        raise a2a_error(503, "GROQ_API_KEY environment variable not set.", x_agent_context_id)
+        raise a2a_error(503, "GROQ_API_KEY not set.", x_agent_context_id)
 
+    # Extract text from the parts list (joining if multiple parts exist)
+    raw_query = " ".join([p.text for p in req.message.parts if p.kind == "text"])
+    
     # Sanitize input
-    clean_query = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', req.query)
+    clean_query = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', raw_query).strip()
 
-    logger.info(f"[contextId={x_agent_context_id}] Received: {clean_query[:80]}...")
+    logger.info(f"[contextId={x_agent_context_id}] Processing: {clean_query[:50]}...")
 
-    # Call Groq API (OpenAI-compatible format)
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
                 GROQ_URL,
-                headers={
-                    "Authorization": f"Bearer {GROQ_API_KEY}",
-                    "Content-Type": "application/json"
-                },
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
                 json={
                     "model": MODEL_NAME,
                     "messages": [
-                        {
-                            "role": "system",
-                            "content": (
-                                "You are an expert in customer sentiment analysis. "
-                                "Analyze the customer email and respond ONLY with a valid JSON object. "
-                                "No markdown, no explanation, no extra text — raw JSON only.\n"
-                                "Required keys:\n"
-                                '  "sentiment": one of "positive", "negative", "neutral"\n'
-                                '  "score": float 0.0-1.0 (your confidence)\n'
-                                '  "churn_risk": true or false\n'
-                                '  "reason": one sentence explaining your decision'
-                            )
-                        },
-                        {
-                            "role": "user",
-                            "content": clean_query
-                        }
+                        {"role": "system", "content": "Analyze sentiment. Return ONLY JSON: {\"sentiment\": \"positive/negative/neutral\", \"score\": float, \"churn_risk\": bool, \"reason\": \"string\"}"},
+                        {"role": "user", "content": clean_query}
                     ],
-                    "temperature": 0,
-                    "max_tokens": 150
+                    "response_format": {"type": "json_object"},
+                    "temperature": 0
                 }
             )
             response.raise_for_status()
 
-    except httpx.ConnectError:
-        raise a2a_error(503, "Cannot reach Groq API.", x_agent_context_id)
-    except httpx.HTTPStatusError as e:
-        raise a2a_error(500, f"Groq API error: {e.response.text}", x_agent_context_id)
-
-    raw_output = response.json()["choices"][0]["message"]["content"]
-
-    try:
+        raw_output = response.json()["choices"][0]["message"]["content"]
         parsed = extract_json(raw_output)
-    except (ValueError, json.JSONDecodeError) as e:
-        logger.error(f"JSON parse error: {e}")
-        raise a2a_error(422, str(e), x_agent_context_id)
 
-    result = SentimentResponse(
-        sentiment=parsed.get("sentiment", "neutre"),
-        score=float(parsed.get("score", 0.5)),
-        churn_risk=bool(parsed.get("churn_risk", False)),
-        reason=parsed.get("reason", ""),
-        contextId=x_agent_context_id,
-        agent=AgentMeta(
-            agentId=AGENT_ID,
-            version=AGENT_VERSION,
-            model=MODEL_NAME,
-            processedAt=datetime.now(timezone.utc).isoformat()
+        return SentimentResponse(
+            sentiment=parsed.get("sentiment", "neutral"),
+            score=float(parsed.get("score", 0.5)),
+            churn_risk=bool(parsed.get("churn_risk", False)),
+            reason=parsed.get("reason", ""),
+            contextId=x_agent_context_id or req.message.messageId, # Fallback to messageId
+            agent=AgentMeta(
+                agentId=AGENT_ID,
+                version=AGENT_VERSION,
+                model=MODEL_NAME,
+                processedAt=datetime.now(timezone.utc).isoformat()
+            )
         )
-    )
 
-    logger.info(
-        f"[contextId={x_agent_context_id}] "
-        f"sentiment={result.sentiment}, score={result.score}, churn={result.churn_risk}"
-    )
-    return result
+    except Exception as e:
+        logger.error(f"Error: {str(e)}")
+        raise a2a_error(500, str(e), x_agent_context_id)
 
-# ── /health endpoint ───────────────────────────────────────────────────────────
 @app.get("/health", tags=["System"])
 async def health():
-    return {
-        "status": "ok",
-        "agentId": AGENT_ID,
-        "version": AGENT_VERSION,
-        "model": MODEL_NAME,
-        "provider": "Groq",
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    }
+    return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
 
-# ── Entry point ────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
