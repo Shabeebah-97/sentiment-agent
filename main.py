@@ -100,7 +100,7 @@ class SentimentResponse(BaseModel):
     agent: AgentMeta
 
 # ── A2A Agent Card endpoint ────────────────────────────────────────────────────
-@app.get("/.well-known/agent-card.json", tags=["A2A"])
+@app.get("/analyze/.well-known/agent-card.json", tags=["A2A"])
 async def agent_card():
     return JSONResponse(content=AGENT_CARD)
 
