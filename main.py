@@ -194,19 +194,27 @@ async def analyze_sentiment(
         raw_output = response.json()["choices"][0]["message"]["content"]
         parsed = extract_json(raw_output)
 
-        return SentimentResponse(
-            sentiment=parsed.get("sentiment", "neutral"),
-            score=float(parsed.get("score", 0.5)),
-            churn_risk=bool(parsed.get("churn_risk", False)),
-            reason=parsed.get("reason", ""),
-            contextId=x_agent_context_id or req.message.messageId, # Fallback to messageId
-            agent=AgentMeta(
-                agentId=AGENT_ID,
-                version=AGENT_VERSION,
-                model=MODEL_NAME,
-                processedAt=datetime.now(timezone.utc).isoformat()
-            )
-        )
+# 1. Create the internal result object (your existing SentimentResponse logic)
+    sentiment_data = {
+        "sentiment": parsed.get("sentiment", "neutral"),
+        "score": float(parsed.get("score", 0.5)),
+        "churn_risk": bool(parsed.get("churn_risk", False)),
+        "reason": parsed.get("reason", ""),
+        "contextId": x_agent_context_id or req.message.messageId,
+        "agent": {
+            "agentId": AGENT_ID,
+            "version": AGENT_VERSION,
+            "model": MODEL_NAME,
+            "processedAt": datetime.now(timezone.utc).isoformat()
+        }
+    }        
+
+# 2. Wrap it in the JSON-RPC format required by the A2A spec
+    return {
+        "jsonrpc": "2.0",
+        "id": req.message.messageId, # Use the incoming messageId as the RPC ID
+        "result": sentiment_data
+    }
 
     except Exception as e:
         logger.error(f"Error: {str(e)}")
