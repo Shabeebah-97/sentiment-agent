@@ -39,47 +39,46 @@ else:
 
 # ── A2A Agent Card ─────────────────────────────────────────────────────────────
 AGENT_CARD = {
-    "id": AGENT_ID,
-    "version": AGENT_VERSION,
-    "name": "Customer Sentiment Analysis Agent",
-    "description": (
-        "Analyzes the emotional state of a customer from raw email text. "
-        "Returns sentiment classification, confidence score, and churn risk."
-    ),
-    "protocol": "A2A/1.0",
-    "endpoints": {
-        "analyze": {
-            "path": "/analyze",
-            "method": "POST",
-            "description": "Analyze sentiment of a customer email",
-            "headers": {
-                "x-agent-context-id": {
-                    "required": False,
-                    "description": "Correlation ID for tracing across agent calls"
-                }
-            },
-            "input": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Raw email text"}
-                },
-                "required": ["query"]
-            },
-            "output": {
-                "type": "object",
-                "properties": {
-                    "sentiment": {"type": "string", "enum": ["positif", "négatif", "neutre"]},
-                    "score":      {"type": "number"},
-                    "churn_risk": {"type": "boolean"},
-                    "reason":     {"type": "string"},
-                    "contextId":  {"type": "string"},
-                    "agent":      {"type": "object"}
-                }
-            }
-        }
-    },
-    "capabilities": ["sentiment-analysis", "churn-prediction", "email-classification"],
-    "model": {"name": MODEL_NAME, "provider": "Groq (cloud)", "type": "remote"}
+"name": "sentiment-analysis-agent",
+  "url": "https://sentiment-agent-palq.onrender.com/",
+  "version": "1.0.0",
+  "protocolVersion": "1.0.0",
+  "description": "Analyzes customer email or text to determine sentiment, confidence score, and churn risk. Helps downstream systems decide retention strategies and customer engagement actions.",
+  "skills": [
+    {
+      "id": "1",
+      "name": "Customer Sentiment Analysis",
+      "description": "Analyzes raw customer text (emails, messages) to classify sentiment (positive, negative, neutral), estimate confidence score, and detect churn risk indicators. Provides reasoning to support the classification.",
+      "tags": [
+        "sentiment",
+        "churn",
+        "nlp",
+        "customer-experience"
+      ],
+      "examples": [
+        "I am very unhappy with your service and want to cancel my subscription.",
+        "Everything is great, thank you for the support!",
+        "The product is okay but delivery was late."
+      ],
+      "inputModes": [
+        "application/json",
+        "text/plain"
+      ]
+    }
+  ],
+  "capabilities": {
+    "streaming": false,
+    "pushNotifications": false,
+    "stateTransitionHistory": false,
+    "extensions": []
+  },
+  "defaultInputModes": [
+    "application/json"
+  ],
+  "defaultOutputModes": [
+    "application/json"
+  ],
+  "supportsAuthenticatedExtendedCard": false    
 }
 
 # ── Schemas ────────────────────────────────────────────────────────────────────
@@ -101,7 +100,7 @@ class SentimentResponse(BaseModel):
     agent: AgentMeta
 
 # ── A2A Agent Card endpoint ────────────────────────────────────────────────────
-@app.get("/.well-known/agent.json", tags=["A2A"])
+@app.get("/.well-known/agent-card.json", tags=["A2A"])
 async def agent_card():
     return JSONResponse(content=AGENT_CARD)
 
@@ -180,7 +179,7 @@ async def analyze_sentiment(
                                 "Analyze the customer email and respond ONLY with a valid JSON object. "
                                 "No markdown, no explanation, no extra text — raw JSON only.\n"
                                 "Required keys:\n"
-                                '  "sentiment": one of "positif", "négatif", "neutre"\n'
+                                '  "sentiment": one of "positive", "negative", "neutral"\n'
                                 '  "score": float 0.0-1.0 (your confidence)\n'
                                 '  "churn_risk": true or false\n'
                                 '  "reason": one sentence explaining your decision'
