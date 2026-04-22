@@ -147,11 +147,15 @@ def extract_json(raw_text: str) -> dict:
 def a2a_error(status_code: int, message: str, context_id: str | None):
     return HTTPException(
         status_code=status_code,
-        detail={
-            "error": message,
-            "contextId": context_id,
-            "agentId": AGENT_ID,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+        content={
+            "jsonrpc": "2.0",
+            "id": context_id,
+            "result": {
+                "error": message,
+                "contextId": context_id,
+                "agentId": AGENT_ID,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
         }
     )
 
