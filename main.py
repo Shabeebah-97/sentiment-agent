@@ -86,21 +86,27 @@ AGENT_CARD = {
 # ── Updated Schemas to match your Payload ──────────────────────────────────────
 
 class MessagePart(BaseModel):
-# Use Optional for robustness, though text is usually required
     text: Optional[str] = "I am angry with the invoice"
     kind: Optional[str] = "text"
 
 class MessageContent(BaseModel):
     role: Optional[str] = "user"
     parts: List[MessagePart]
-    messageId: Optional[str] = Field(default_factory=lambda: "unknown")
+    messageId: Optional[str] = Field(default="unknown")
     kind: Optional[str] = "text"
     model_config = ConfigDict(extra="allow")
 
+class PayloadWrapper(BaseModel):
+    """Handles the 'payload' key inside the root object"""
+    message: MessageContent
+    model_config = ConfigDict(extra="allow")
+
 class AgentRequest(BaseModel):
-# A2A payloads sometimes wrap everything in 'message' or send it flat
-    # We make 'message' optional or use an alias to catch variations
-    message: Optional[MessageContent] = None
+    """
+    Root object. 
+    Expects: {"payload": {"message": {"parts": [...]}}}
+    """
+    payload: PayloadWrapper
     model_config = ConfigDict(extra="allow")
 
 class AgentMeta(BaseModel):
@@ -164,7 +170,7 @@ def a2a_error(status_code: int, message: str, context_id: str | None):
 # ── Dynamic Error Handler ─────────────────────────────────────────────────────
 
 @app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
+async def validation_exception_handler(request: Request, exc: RequestValidationError, context_id: str | None):
     """
     Dynamically catches any schema mismatch (wrong keys, missing fields, etc.)
     and returns the specific error details.
@@ -180,13 +186,13 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         status_code=status.HTTP_400_BAD_REQUEST,
         content={
             "jsonrpc": "2.0",
-            "id": "20260422",
+            "id": context_id,
             "result": {
                 "error": "Validation error: " + "; ".join(errors),
                 "agentId": AGENT_ID,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "kind" : "message" ,
-                "id" : "20260422"
+                "id" : context_id
             }
         }
     )
