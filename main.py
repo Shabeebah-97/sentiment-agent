@@ -182,6 +182,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             "jsonrpc": "2.0",
             "id": "validation_error",
             "result": {
+                "kind": "message",
                 "type": "SchemaMismatch",
                 "message": "The payload does not match the required schema.",
                 "details": errors
