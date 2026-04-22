@@ -159,12 +159,24 @@ def a2a_error(status_code: int, message: str, context_id: str | None):
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
-@app.get("/analyze/.well-known/agent-card.json", tags=["A2A"])
+@app.post("/debug", tags=["Debug"])
+async def debug_payload(request: httpx.Request):
+    body = await request.body()
+    logger.info(f"=== DEBUG HEADERS: {dict(request.headers)}")
+    logger.info(f"=== DEBUG BODY: {body.decode('utf-8', errors='replace')}")
+    return {
+        "headers": dict(request.headers),
+        "raw_body": body.decode("utf-8", errors="replace"),
+        "content_type": request.headers.get("content-type")
+    }
+
+@app.get("/debug/.well-known/agent-card.json", tags=["A2A"])
 async def agent_card():
     # (Agent card logic remains the same)
     return JSONResponse(content=AGENT_CARD)
 
 @app.post("/analyze", response_model=JsonRpcResponse, tags=["Agent"])
+
 async def analyze_sentiment(
     req: AgentRequest,
     x_agent_context_id: str = Header(None)
