@@ -160,7 +160,7 @@ def a2a_error(status_code: int, message: str, context_id: str | None):
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
 @app.post("/debug", tags=["Debug"])
-async def debug_payload(request: httpx.Request):
+async def debug_payload(request: AgentRequest):
     body = await request.body()
     logger.info(f"=== DEBUG HEADERS: {dict(request.headers)}")
     logger.info(f"=== DEBUG BODY: {body.decode('utf-8', errors='replace')}")
