@@ -188,7 +188,8 @@ async def analyze_sentiment(
 ):
     if not GROQ_API_KEY:
         raise a2a_error(503, "GROQ_API_KEY not set.", x_agent_context_id)
-
+    
+    logger.info(f"[request={AgentRequest}])")
     # Extract text from the parts list (joining if multiple parts exist)
     raw_query = " ".join([p.text for p in req.message.parts if p.kind == "text"])
     
