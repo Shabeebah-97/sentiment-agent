@@ -1,3 +1,5 @@
+import uuid
+
 from fastapi import FastAPI, Header, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
@@ -126,10 +128,35 @@ class SentimentResponse(BaseModel):
     contextId: Optional[str] = None
     agent: AgentMeta
 
+# ── Response Schemas (A2A Specification) ──────────────────────────────────────
+
+class ResponsePart(BaseModel):
+    kind: str = "text"
+    text: str
+
+class Artifact(BaseModel):
+    artifactId: str
+    name: str
+    parts: List[ResponsePart]
+
+class TaskStatus(BaseModel):
+    state: str = "completed"
+
+class A2AResult(BaseModel):
+    """
+    Fixed structure: contains the 'kind' discriminator 
+    required by io.a2a.spec.SendMessageResponse
+    """
+    kind: str = "task" 
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    contextId: str
+    status: TaskStatus = Field(default_factory=TaskStatus)
+    artifacts: List[Artifact]
+
 class JsonRpcResponse(BaseModel):
     jsonrpc: str = "2.0"
     id: str
-    result: SentimentResponse  # This nests your existing model inside 'result'
+    result: A2AResult
 # ── JSON extractor ─────────────────────────────────────────────────────────────
 def extract_json(raw_text: str) -> dict:
     # Try clean parse first
@@ -273,27 +300,20 @@ async def analyze_sentiment(
         raw_output = response.json()["choices"][0]["message"]["content"]
         parsed = extract_json(raw_output)
 
-        # 3. Create the internal result object
-        sentiment_data = {
-            "sentiment": parsed.get("sentiment", "neutral"),
-            "score": float(parsed.get("score", 0.5)),
-            "churn_risk": bool(parsed.get("churn_risk", False)),
-            "reason": parsed.get("reason", ""),
-            "contextId": context_id,
-            "agent": {
-                "agentId": AGENT_ID,
-                "version": AGENT_VERSION,
-                "model": MODEL_NAME,
-                "processedAt": datetime.now(timezone.utc).isoformat()
-            }
-        }        
+        # 3. Construct A2A-Compliant Response with new Generated Task ID
+        result_data = A2AResult(
+            id=str(uuid.uuid4()), # Generates a fresh UUID for the task
+            contextId=context_id,
+            artifacts=[
+                Artifact(
+                    artifactId="sentiment-analysis-output",
+                    name="Sentiment Analysis",
+                    parts=[ResponsePart(text=json.dumps(parsed))]
+                )
+            ]
+        )
 
-        # 4. Wrap in JSON-RPC format, echoing the incoming 'id'
-        return {
-            "jsonrpc": "2.0",
-            "id": req.id or "unknown", 
-            "result": sentiment_data
-        }
+        return JsonRpcResponse(id=req.id, result=result_data)
 
     except Exception as e:
         logger.error(f"Error: {str(e)}")
