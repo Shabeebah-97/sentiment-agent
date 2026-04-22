@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Optional
 import httpx
 import json
@@ -85,18 +85,23 @@ AGENT_CARD = {
 # ── Updated Schemas to match your Payload ──────────────────────────────────────
 
 class MessagePart(BaseModel):
-    text: str
-    kind: str
+# Use Optional for robustness, though text is usually required
+    text: Optional[str] = ""
+    kind: Optional[str] = "text"
+    model_config = ConfigDict(extra="allow") # Ignore extra fields in parts
 
 class MessageContent(BaseModel):
-    role: str
-    parts: List[MessagePart]
-    messageId: str
-    kind: str
+    role: Optional[str] = "user"
+    parts: List[MessagePart] = []
+    messageId: Optional[str] = Field(default_factory=lambda: "unknown")
+    kind: Optional[str] = None
+    model_config = ConfigDict(extra="allow")
 
 class AgentRequest(BaseModel):
-    # This matches the {"message": {...}} root structure
-    message: MessageContent
+# A2A payloads sometimes wrap everything in 'message' or send it flat
+    # We make 'message' optional or use an alias to catch variations
+    message: Optional[MessageContent] = None
+    model_config = ConfigDict(extra="allow")
 
 class AgentMeta(BaseModel):
     agentId: str
@@ -170,7 +175,7 @@ async def debug_payload(request: AgentRequest):
         "content_type": request.headers.get("content-type")
     }
 
-@app.get("/debug/.well-known/agent-card.json", tags=["A2A"])
+@app.get("/analyze/.well-known/agent-card.json", tags=["A2A"])
 async def agent_card():
     # (Agent card logic remains the same)
     return JSONResponse(content=AGENT_CARD)
