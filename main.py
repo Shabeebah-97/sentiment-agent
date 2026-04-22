@@ -1,5 +1,6 @@
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, Request, status
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Optional
 import httpx
@@ -160,6 +161,34 @@ def a2a_error(status_code: int, message: str, context_id: str | None):
         }
     }
     return JSONResponse(status_code=status_code, content=body)
+# ── Dynamic Error Handler ─────────────────────────────────────────────────────
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """
+    Dynamically catches any schema mismatch (wrong keys, missing fields, etc.)
+    and returns the specific error details.
+    """
+    errors = []
+    for err in exc.errors():
+        # loc[0] is usually 'body', loc[1] is the field name
+        field = " -> ".join([str(x) for x in err["loc"] if x != "body"])
+        message = err.get("msg")
+        errors.append(f"[{field}]: {message}")
+
+    return JSONResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content={
+            "jsonrpc": "2.0",
+            "id": "validation_error",
+            "result": {
+                "type": "SchemaMismatch",
+                "message": "The payload does not match the required schema.",
+                "details": errors
+            }
+        }
+    )
+
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
@@ -186,11 +215,26 @@ async def analyze_sentiment(
     x_agent_context_id: str = Header(None)
 ):
     if not GROQ_API_KEY:
-        raise a2a_error(503, "GROQ_API_KEY not set.", x_agent_context_id)
+        return a2a_error(503, "GROQ_API_KEY not set.", x_agent_context_id)
     
     #logger.info(f"[request={AgentRequest}])")
     # Extract text from the parts list (joining if multiple parts exist)
+    #if not req.message or not hasattr(req.message, 'parts') or req.message.parts is None:
+    #    return a2a_error(400, "Invalid payload: 'message.parts' is missing.", x_agent_context_id)
+
+    # 2. Check if parts list is empty
+    #if len(req.message.parts) == 0:
+    #    return a2a_error(400, "Invalid payload: 'message.parts' list is empty.", x_agent_context_id)
+
+    # 3. Safely extract text
+    try:
+        raw_query = " ".join([p.text for p in req.message.parts if p.text and p.kind == "text"])
+    except Exception as e:
+        logger.error(f"Extraction error: {str(e)}")
+        return a2a_error(400, "Could not parse text from message parts.", x_agent_context_id)    
     raw_query = " ".join([p.text for p in req.message.parts if p.kind == "text"])
+    if not raw_query:
+        return a2a_error(400, "No valid text found in request", x_agent_context_id)
     
     # Sanitize input
     clean_query = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', raw_query).strip()
@@ -241,7 +285,7 @@ async def analyze_sentiment(
 
     except Exception as e:
         logger.error(f"Error: {str(e)}")
-        raise a2a_error(500, str(e), x_agent_context_id)
+        return a2a_error(500, str(e), x_agent_context_id)
 
 @app.get("/health", tags=["System"])
 async def health():
