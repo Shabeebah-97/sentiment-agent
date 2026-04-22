@@ -86,27 +86,30 @@ AGENT_CARD = {
 # ── Updated Schemas to match your Payload ──────────────────────────────────────
 
 class MessagePart(BaseModel):
-    text: Optional[str] = "I am angry with the invoice"
+    text: str
     kind: Optional[str] = "text"
 
 class MessageContent(BaseModel):
     role: Optional[str] = "user"
     parts: List[MessagePart]
-    messageId: Optional[str] = Field(default="unknown")
-    kind: Optional[str] = "text"
+    messageId: Optional[str] = None
+    kind: Optional[str] = "message"
     model_config = ConfigDict(extra="allow")
 
-class PayloadWrapper(BaseModel):
-    """Handles the 'payload' key inside the root object"""
+class ParamsWrapper(BaseModel):
+    """Handles the 'params' key"""
     message: MessageContent
     model_config = ConfigDict(extra="allow")
 
 class AgentRequest(BaseModel):
     """
-    Root object. 
-    Expects: {"payload": {"message": {"parts": [...]}}}
+    Matches the JSON-RPC root:
+    {'jsonrpc': '2.0', 'id': '11', 'method': 'message/send', 'params': {...}}
     """
-    payload: PayloadWrapper
+    jsonrpc: str = "2.0"
+    id: Optional[str] = None
+    method: Optional[str] = None
+    params: ParamsWrapper  # This is the key change
     model_config = ConfigDict(extra="allow")
 
 class AgentMeta(BaseModel):
@@ -217,7 +220,6 @@ async def agent_card():
     return JSONResponse(content=AGENT_CARD)
 
 @app.post("/analyze", response_model=JsonRpcResponse, tags=["Agent"])
-
 async def analyze_sentiment(
     req: AgentRequest,
     x_agent_context_id: str = Header(None)
@@ -225,29 +227,31 @@ async def analyze_sentiment(
     if not GROQ_API_KEY:
         return a2a_error(503, "GROQ_API_KEY not set.", x_agent_context_id)
     
-    #logger.info(f"[request={AgentRequest}])")
-    # Extract text from the parts list (joining if multiple parts exist)
-    #if not req.message or not hasattr(req.message, 'parts') or req.message.parts is None:
-    #    return a2a_error(400, "Invalid payload: 'message.parts' is missing.", x_agent_context_id)
-
-    # 2. Check if parts list is empty
-    #if len(req.message.parts) == 0:
-    #    return a2a_error(400, "Invalid payload: 'message.parts' list is empty.", x_agent_context_id)
-
-    # 3. Safely extract text
     try:
-        raw_query = " ".join([p.text for p in req.message.parts if p.text and p.kind == "text"])
+        # 1. Access nested data via params -> message
+        message_obj = req.params.message
+        
+        # 2. Extract text from the first element of parts
+        if message_obj.parts and len(message_obj.parts) > 0:
+            # We take the first part specifically as per your requirement
+            raw_query = message_obj.parts[0].text
+        else:
+            return a2a_error(400, "Invalid payload: 'params.message.parts' is empty.", x_agent_context_id)
+
+        if not raw_query:
+            return a2a_error(400, "No valid text found in message parts", x_agent_context_id)
+            
     except Exception as e:
         logger.error(f"Extraction error: {str(e)}")
-        return a2a_error(400, "Could not parse text from message parts.", x_agent_context_id)    
-    raw_query = " ".join([p.text for p in req.message.parts if p.kind == "text"])
-    if not raw_query:
-        return a2a_error(400, "No valid text found in request", x_agent_context_id)
-    
-    # Sanitize input
-    clean_query = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', raw_query).strip()
+        return a2a_error(400, f"Path params.message.parts[0].text not found: {str(e)}", x_agent_context_id)
 
-    logger.info(f"[contextId={x_agent_context_id}] Processing: {clean_query[:50]}...")
+    # Sanitize input (handles the \n from your payload)
+    clean_query = raw_query.strip()
+    
+    # Priority for ID: Header -> JSON-RPC ID -> messageId
+    context_id = x_agent_context_id or req.id or message_obj.messageId
+
+    logger.info(f"[contextId={context_id}] Processing: {clean_query[:50]}...")
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -269,13 +273,13 @@ async def analyze_sentiment(
         raw_output = response.json()["choices"][0]["message"]["content"]
         parsed = extract_json(raw_output)
 
-        # 1. Create the internal result object (your existing SentimentResponse logic)
+        # 3. Create the internal result object
         sentiment_data = {
             "sentiment": parsed.get("sentiment", "neutral"),
             "score": float(parsed.get("score", 0.5)),
             "churn_risk": bool(parsed.get("churn_risk", False)),
             "reason": parsed.get("reason", ""),
-            "contextId": x_agent_context_id or req.message.messageId,
+            "contextId": context_id,
             "agent": {
                 "agentId": AGENT_ID,
                 "version": AGENT_VERSION,
@@ -284,16 +288,16 @@ async def analyze_sentiment(
             }
         }        
 
-        # 2. Wrap it in the JSON-RPC format required by the A2A spec
+        # 4. Wrap in JSON-RPC format, echoing the incoming 'id'
         return {
             "jsonrpc": "2.0",
-            "id": x_agent_context_id or req.message.messageId, # Use the incoming messageId as the RPC ID
+            "id": req.id or "unknown", 
             "result": sentiment_data
         }
 
     except Exception as e:
         logger.error(f"Error: {str(e)}")
-        return a2a_error(500, str(e), x_agent_context_id)
+        return a2a_error(500, str(e), context_id)
 
 @app.get("/health", tags=["System"])
 async def health():
