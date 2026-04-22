@@ -160,7 +160,7 @@ def a2a_error(status_code: int, message: str, context_id: str | None):
 @app.get("/analyze/.well-known/agent-card.json", tags=["A2A"])
 async def agent_card():
     # (Agent card logic remains the same)
-    return JSONResponse(content={"name": "sentiment-analysis-agent"})
+    return JSONResponse(content=AGENT_CARD)
 
 @app.post("/analyze", response_model=JsonRpcResponse, tags=["Agent"])
 async def analyze_sentiment(
