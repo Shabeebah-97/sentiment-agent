@@ -86,15 +86,14 @@ AGENT_CARD = {
 
 class MessagePart(BaseModel):
 # Use Optional for robustness, though text is usually required
-    text: Optional[str] = ""
+    text: Optional[str] = "I am angry with the invoice"
     kind: Optional[str] = "text"
-    model_config = ConfigDict(extra="allow") # Ignore extra fields in parts
 
 class MessageContent(BaseModel):
     role: Optional[str] = "user"
-    parts: List[MessagePart] = []
+    parts: List[MessagePart]
     messageId: Optional[str] = Field(default_factory=lambda: "unknown")
-    kind: Optional[str] = None
+    kind: Optional[str] = "text"
     model_config = ConfigDict(extra="allow")
 
 class AgentRequest(BaseModel):
@@ -189,7 +188,7 @@ async def analyze_sentiment(
     if not GROQ_API_KEY:
         raise a2a_error(503, "GROQ_API_KEY not set.", x_agent_context_id)
     
-    logger.info(f"[request={AgentRequest}])")
+    #logger.info(f"[request={AgentRequest}])")
     # Extract text from the parts list (joining if multiple parts exist)
     raw_query = " ".join([p.text for p in req.message.parts if p.kind == "text"])
     
