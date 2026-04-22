@@ -145,19 +145,17 @@ def extract_json(raw_text: str) -> dict:
 
 # ── A2A error helper ───────────────────────────────────────────────────────────
 def a2a_error(status_code: int, message: str, context_id: str | None):
-    return HTTPException(
-        status_code=status_code,
-        content={
-            "jsonrpc": "2.0",
-            "id": context_id,
-            "result": {
-                "error": message,
-                "contextId": context_id,
-                "agentId": AGENT_ID,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }
+    body = {
+        "jsonrpc": "2.0",
+        "id": context_id,
+        "result": {
+            "error": message,
+            "contextId": context_id,
+            "agentId": AGENT_ID,
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
-    )
+    }
+    return JSONResponse(status_code=status_code, content=body)
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
