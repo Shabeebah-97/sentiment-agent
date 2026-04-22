@@ -180,12 +180,13 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         status_code=status.HTTP_400_BAD_REQUEST,
         content={
             "jsonrpc": "2.0",
-            "id": "validation_error",
+            "id": "20260422",
             "result": {
-                "kind": "message",
-                "type": "SchemaMismatch",
-                "message": "The payload does not match the required schema.",
-                "details": errors
+                "error": "Validation error: " + "; ".join(errors),
+                "agentId": AGENT_ID,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "kind" : "message" ,
+                "id" : "20260422"
             }
         }
     )
